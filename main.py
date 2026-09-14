@@ -1,6 +1,6 @@
 from ultralytics import YOLO
 import cv2
-
+import numpy as np
 import util
 from sort.sort import *
 from util import get_car, read_license_plate, write_csv
@@ -12,7 +12,7 @@ mot_tracker = Sort()
 
 # load models
 coco_model = YOLO('yolov8n.pt')
-license_plate_detector = YOLO('license_plate_detector.pt')
+license_plate_detector = YOLO('HurricaneOD_beta.pt')
 
 # load video
 cap = cv2.VideoCapture('./sample.mp4')
@@ -35,7 +35,10 @@ while ret:
             if int(class_id) in vehicles:
                 detections_.append([x1, y1, x2, y2, score])
 
-        # track vehicles
+       # track vehicles
+    if len(detections_) == 0:
+        track_ids = mot_tracker.update(np.empty((0, 5)))
+    else:
         track_ids = mot_tracker.update(np.asarray(detections_))
 
         # detect license plates
