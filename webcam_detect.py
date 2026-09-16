@@ -1,15 +1,52 @@
 import cv2
 import os
+import argparse
 from ultralytics import YOLO
 
 save_folder = 'captured_plates'
 if not os.path.exists(save_folder):
     os.makedirs(save_folder)
 
+
+def open_camera(camera_index):
+    """Open a Windows camera using DirectShow, including Iriun Virtual Camera."""
+    if camera_index == 'auto':
+        available_cameras = []
+        for index in range(6):
+            test_camera = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+            if test_camera.isOpened():
+                available_cameras.append(index)
+                test_camera.release()
+
+        if not available_cameras:
+            return None, []
+
+        # Iriun is commonly the second camera exposed by Windows.
+        camera_index = 1 if 1 in available_cameras else available_cameras[0]
+
+    camera = cv2.VideoCapture(int(camera_index), cv2.CAP_DSHOW)
+    return camera if camera.isOpened() else None, [camera_index]
+
+
+parser = argparse.ArgumentParser(description='ตรวจจับป้ายทะเบียนจากกล้อง Iriun')
+parser.add_argument(
+    '--camera',
+    default=os.environ.get('IRIUN_CAMERA_INDEX', 'auto'),
+    help='หมายเลขกล้อง เช่น 1 หรือ auto (ค่าเริ่มต้น: auto)',
+)
+args = parser.parse_args()
+
 print("กำลังโหลดโมเดล YOLO...")
 plate_detector = YOLO('HurricaneOD_beta.pt')
 
-cap = cv2.VideoCapture(0)
+cap, detected_cameras = open_camera(args.camera)
+if cap is None:
+    print("ไม่สามารถเปิดกล้องได้")
+    print("ตรวจสอบว่าเปิด Iriun Webcam บนมือถือและ Iriun Webcam บนคอมพิวเตอร์แล้ว")
+    print("ลองระบุหมายเลขกล้องด้วยคำสั่ง: python webcam_detect.py --camera 1")
+    raise SystemExit(1)
+
+print(f"เชื่อมต่อกล้องหมายเลข {detected_cameras[0]} แล้ว")
 img_count = 0
 
 print("\n--- ระบบพร้อมใช้งาน ---")
