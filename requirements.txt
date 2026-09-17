@@ -1,7 +1,7 @@
 ultralytics==8.0.114
 pandas
 opencv-python
-numpy
+numpy<2
 scipy
 easyocr
 filterpy
