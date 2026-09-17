@@ -12,3 +12,5 @@
 ภาพที่ 8 (ไฟล์ captured_plates/plate_angle_8.jpg): ii 888
 ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): กท 2058 ฉะเบิงเทรา
 ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): iriun webram
+ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): iriun webram
+ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 888 กรงเทพมหานคร
