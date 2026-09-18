@@ -122,8 +122,9 @@ while True:
             text_confidences = []
             for (bbox, text, prob) in ocr_results:
                 cleaned_text = re.sub(r"[^ก-๙A-Za-z0-9]", "", text)
-                if prob > 0.35 and len(cleaned_text) >= 3:
-                    plate_text += text + " "
+                # ตัวอักษรไทยด้านหน้าป้ายอาจมีเพียง 1-2 ตัว จึงไม่บังคับความยาวขั้นต่ำ 3 ตัว
+                if prob > 0.35 and cleaned_text:
+                    plate_text += cleaned_text + " "
                     text_confidences.append(prob)
 
             plate_text = plate_text.strip()
