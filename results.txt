@@ -13,3 +13,4 @@
 ภาพที่ 2 (ไฟล์ captured_plates/plate_angle_2.jpg): กก 2563
 ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 2058 ฉะเชิงเทรา
 ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 720 กรงเทพมหานคร
+ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): wพ 720 กรุงเทพมทานคร
