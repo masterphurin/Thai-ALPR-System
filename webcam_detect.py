@@ -12,6 +12,39 @@ print("กำลังโหลดโมเดล YOLO และ EasyOCR...")
 plate_detector = YOLO('HurricaneOD_beta.pt')
 reader = easyocr.Reader(['th', 'en'], gpu=False)
 
+
+def reduce_glare(image, boxes):
+    """ลดบริเวณไฮไลต์จ้าบนป้ายก่อนบันทึกภาพ โดยไม่กระทบการตรวจจับและ OCR"""
+    processed_image = image.copy()
+
+    for x1, y1, x2, y2 in boxes:
+        image_height, image_width = processed_image.shape[:2]
+        x1 = max(0, min(x1, image_width))
+        x2 = max(0, min(x2, image_width))
+        y1 = max(0, min(y1, image_height))
+        y2 = max(0, min(y2, image_height))
+        if x1 >= x2 or y1 >= y2:
+            continue
+
+        plate_region = processed_image[y1:y2, x1:x2]
+        hsv_region = cv2.cvtColor(plate_region, cv2.COLOR_BGR2HSV)
+        value_channel = hsv_region[:, :, 2].astype('float32')
+
+        # บีบความสว่างส่วนที่จ้าเกินไปเพื่อให้รายละเอียดใต้แสงสะท้อนเด่นขึ้น
+        highlight_threshold = 200.0
+        highlight_compression = 0.25
+        highlight_mask = value_channel > highlight_threshold
+        value_channel[highlight_mask] = (
+            highlight_threshold
+            + (value_channel[highlight_mask] - highlight_threshold)
+            * highlight_compression
+        )
+        hsv_region[:, :, 2] = value_channel.astype('uint8')
+        processed_image[y1:y2, x1:x2] = cv2.cvtColor(hsv_region, cv2.COLOR_HSV2BGR)
+
+    return processed_image
+
+
 # ใช้ CAM_ID ระบุหมายเลขกล้องได้ เช่น PowerShell: $env:CAM_ID=1
 configured_cam_id = os.getenv('CAM_ID')
 camera_ids = [int(configured_cam_id)] if configured_cam_id else [0, 1, 2, 3]
@@ -108,7 +141,8 @@ while True:
                 img_count += 1
                 plate_was_detected = True
                 filename = f"{save_folder}/plate_angle_{img_count}.jpg"
-                cv2.imwrite(filename, frame)
+                captured_frame = reduce_glare(frame, detected_boxes)
+                cv2.imwrite(filename, captured_frame)
                 print(f"\n📸 ยืนยันตัวอักษรแล้วและบันทึกภาพ: {filename}")
 
                 with open("results.txt", "a", encoding="utf-8") as f:
