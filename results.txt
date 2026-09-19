@@ -1,8 +1,2 @@
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 5กข2662 กรุงเทพมทานคร
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): ยทะเบียนรถของไ. sure plate detected 776 2557
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): ทพมทานคร
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): รู้จักกับสีป้ายทะเบียนรถของ visit ไทยแด่ละประเภท toyot.  save share
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): าน 776 25$7
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 662
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): 5กข2662 กรงเทพมทานคร
-ภาพที่ 1 (ไฟล์ captured_plates/plate_angle_1.jpg): ผก 8534 กรุงเทพมหามคร
+ภาพที่ 1 (ไฟล์ plates\plate_0001.jpg): ii confidence=0.921
+ภาพที่ 2 (ไฟล์ plates\plate_0002.jpg): า confidence=0.858

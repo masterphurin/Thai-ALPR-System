@@ -1,110 +1,159 @@
-import cv2
+import argparse
 import os
+from collections import deque
+
+import cv2
 import easyocr
 from ultralytics import YOLO
 
-save_folder = 'captured_plates'
-if not os.path.exists(save_folder):
-    os.makedirs(save_folder)
 
-print("กำลังโหลดโมเดล YOLO และ EasyOCR...")
-plate_detector = YOLO('HurricaneOD_beta.pt')
-reader = easyocr.Reader(['th', 'en'], gpu=False)
+PLATE_DIR = 'plates'
+RESULTS_FILE = 'results.txt'
+MODEL_PATH = 'license_plate_detector.pt'
+MIN_PLATE_CONFIDENCE = 0.50
 
-# ใช้ CAM_ID ระบุหมายเลขกล้องได้ เช่น PowerShell: $env:CAM_ID=1
-configured_cam_id = os.getenv('CAM_ID')
-camera_ids = [int(configured_cam_id)] if configured_cam_id else [0, 1, 2, 3]
-camera_ids = list(dict.fromkeys(camera_ids))
 
-cap = None
-cam_id = None
-for candidate_id in camera_ids:
-    # CAP_DSHOW ช่วยให้กล้อง USB และ Iriun ทำงานได้เสถียรกว่าบน Windows
-    candidate = cv2.VideoCapture(candidate_id, cv2.CAP_DSHOW)
-    if not candidate.isOpened():
-        candidate.release()
-        candidate = cv2.VideoCapture(candidate_id)
+def intersection_over_union(first, second):
+    left = max(first[0], second[0])
+    top = max(first[1], second[1])
+    right = min(first[2], second[2])
+    bottom = min(first[3], second[3])
+    overlap = max(0, right - left) * max(0, bottom - top)
+    first_area = max(1, first[2] - first[0]) * max(1, first[3] - first[1])
+    second_area = max(1, second[2] - second[0]) * max(1, second[3] - second[1])
+    return overlap / float(first_area + second_area - overlap)
 
-    if candidate.isOpened():
-        cap = candidate
-        cam_id = candidate_id
-        break
-    candidate.release()
 
-if cap is None:
-    print("\n❌ ไม่พบกล้องที่สามารถเชื่อมต่อได้")
-    print(f"หมายเลขที่ลอง: {camera_ids}")
-    print("ตรวจสอบว่าเสียบกล้องแล้ว ปิดโปรแกรมอื่นที่กำลังใช้กล้อง และเปิด Iriun ก่อน")
-    print("หากต้องการระบุหมายเลขเอง ให้ตั้งค่า CAM_ID เช่น: $env:CAM_ID=1")
-    raise SystemExit(1)
+def clamp_box(box, width, height):
+    x1, y1, x2, y2 = box
+    return max(0, x1), max(0, y1), min(width, x2), min(height, y2)
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-img_count = 0
-print(f"\n✅ เชื่อมต่อกล้องหมายเลข {cam_id} สำเร็จ!")
-print("--- ระบบพร้อมใช้งาน (รันครบข้อ 1-4) ---")
-print(">> นำป้ายทะเบียนมาส่องที่กล้อง")
-print(">> กด 'c' เพื่อ Capture, อ่านตัวอักษร และบันทึกลง Text ไฟล์")
-print(">> กด 'q' เพื่อปิดโปรแกรม")
+def read_best_text(crop, reader):
+    if crop.size == 0:
+        return '', 0.0
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("สัญญาณภาพหลุด ไม่สามารถดึงภาพจากกล้องได้")
-        break
+    scale = max(4, min(8, 1200 // max(1, crop.shape[1])))
+    enlarged = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_LANCZOS4)
+    gray = cv2.cvtColor(enlarged, cv2.COLOR_BGR2GRAY)
+    contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    sharpened = cv2.addWeighted(contrast, 2.0, cv2.GaussianBlur(contrast, (0, 0), 3), -1.0, 0)
+    variants = [enlarged, gray, contrast, sharpened,
+                cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1],
+                cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                      cv2.THRESH_BINARY, 31, 7)]
+    candidates = []
+    for variant in variants:
+        for _, text, confidence in reader.readtext(
+                variant, detail=1, paragraph=False, mag_ratio=1.5,
+                min_size=5, text_threshold=0.3, low_text=0.2, link_threshold=0.2):
+            cleaned = ''.join(text.split()).strip()
+            if cleaned and confidence >= 0.10:
+                score = float(confidence) * (1.0 + min(len(cleaned), 8) * 0.08)
+                candidates.append((cleaned, float(confidence), score))
+    best = max(candidates, key=lambda item: item[2], default=('', 0.0, 0.0))
+    return best[0], best[1]
 
-    # ข้อ 1: Detect ป้ายทะเบียน
-    results = plate_detector(frame, verbose=False)[0]
-    detected_boxes = []
 
-    if len(results.boxes) > 0:
-        for box in results.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            detected_boxes.append((x1, y1, x2, y2))
-            
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(frame, "Plate Detected", (x1, y1 - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+def make_panel(frame, captures, panel_width=300):
+    panel = cv2.resize(frame, (panel_width, frame.shape[0]))
+    cv2.rectangle(panel, (0, 0), (panel_width, 42), (30, 30, 30), -1)
+    cv2.putText(panel, 'PLATES', (16, 28), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+    y = 55
+    for image, label in reversed(captures):
+        if y + 105 > panel.shape[0]:
+            break
+        thumbnail = cv2.resize(image, (panel_width - 20, 78))
+        panel[y:y + 78, 10:panel_width - 10] = thumbnail
+        cv2.putText(panel, label[:32], (10, y + 98), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+        y += 112
+    return panel
 
-    cv2.imshow('Webcam - License Plate Detection', frame)
 
-    key = cv2.waitKey(1) & 0xFF
-    
-    if key == ord('c'):
-        img_count += 1
-        
-        # ข้อ 2: บันทึกภาพที่ Capture
-        filename = f"{save_folder}/plate_angle_{img_count}.jpg"
-        cv2.imwrite(filename, frame)
-        print(f"\n📸 แชะ! บันทึกภาพแล้ว: {filename}")
-        
-        # ข้อ 3 & 4: อ่านตัวอักษรและเซฟไฟล์
-        if len(detected_boxes) > 0:
-            for (x1, y1, x2, y2) in detected_boxes:
-                cropped_plate = frame[y1:y2, x1:x2]
-                
-                # ข้อ 3: อ่านด้วย Algorithm (EasyOCR)
-                ocr_results = reader.readtext(cropped_plate)
-                plate_text = ""
-                for (bbox, text, prob) in ocr_results:
-                    if prob > 0.1:
-                        plate_text += text + " "
-                
-                plate_text = plate_text.strip()
-                if plate_text:
-                    print(f"✅ อ่านป้ายได้: {plate_text}")
-                    # ข้อ 4: เซฟลง Text ไฟล์
-                    with open("results.txt", "a", encoding="utf-8") as f:
-                        f.write(f"ภาพที่ {img_count} (ไฟล์ {filename}): {plate_text}\n")
-                    print("📝 บันทึกผลลัพธ์ลงไฟล์ results.txt เรียบร้อย")
-                else:
-                    print("❌ ระบบเห็นป้าย แต่อ่านตัวหนังสือไม่ออก ลองขยับมุมใหม่ครับ")
-        else:
-            print("⚠️ จังหวะที่กดถ่าย ไม่มีกรอบสีเขียวจับป้ายอยู่")
+def process_video(video_path):
+    os.makedirs(PLATE_DIR, exist_ok=True)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise SystemExit(f'ไม่สามารถเปิดไฟล์วิดีโอได้: {video_path}')
 
-    elif key == ord('q'):
-        break
+    print('กำลังโหลดโมเดล YOLO และ EasyOCR...')
+    plate_detector = YOLO(MODEL_PATH)
+    reader = easyocr.Reader(['th', 'en'], gpu=False)
+    captures = deque(maxlen=8)
+    tracks = []
+    frame_number = 0
+    capture_number = 0
+    frame_gap = max(1, int(cap.get(cv2.CAP_PROP_FPS) * 0.7))
 
-cap.release()
-cv2.destroyAllWindows()
+    with open(RESULTS_FILE, 'w', encoding='utf-8') as results_file:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_number += 1
+            height, width = frame.shape[:2]
+            detections = []
+            result = plate_detector(frame, verbose=False, conf=MIN_PLATE_CONFIDENCE, iou=0.45)[0]
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                x1, y1, x2, y2 = clamp_box((x1, y1, x2, y2), width, height)
+                confidence = float(box.conf[0])
+                if confidence >= MIN_PLATE_CONFIDENCE and x2 > x1 and y2 > y1:
+                    detections.append(((x1, y1, x2, y2), confidence))
+
+            for box, confidence in detections:
+                matching_track = next((track for track in tracks if intersection_over_union(box, track['box']) > 0.20), None)
+                if matching_track is None:
+                    matching_track = {
+                        'box': box,
+                        'best_score': 0,
+                        'first_frame': frame_number,
+                        'last_frame': frame_number,
+                        'captured': False,
+                    }
+                    tracks.append(matching_track)
+                matching_track['box'] = box
+                crop = frame[box[1]:box[3], box[0]:box[2]]
+                sharpness = cv2.Laplacian(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+                quality = confidence * (1.0 + min(sharpness / 100.0, 3.0))
+                if quality > matching_track['best_score']:
+                    matching_track['best_score'] = quality
+                    matching_track['best_crop'] = crop.copy()
+                if frame_number - matching_track['last_frame'] > frame_gap:
+                    matching_track['captured'] = False
+                matching_track['last_frame'] = frame_number
+
+                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+                cv2.putText(frame, f'PLATE {confidence:.2f}', (box[0], max(24, box[1] - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+
+                if not matching_track['captured'] and frame_number - matching_track['first_frame'] >= 3:
+                    capture_number += 1
+                    crop = matching_track.get('best_crop', frame[box[1]:box[3], box[0]:box[2]])
+                    filename = os.path.join(PLATE_DIR, f'plate_{capture_number:04d}.jpg')
+                    cv2.imwrite(filename, crop)
+                    text, text_confidence = read_best_text(crop, reader)
+                    label = text or 'อ่านไม่ออก'
+                    results_file.write(f'ภาพที่ {capture_number} (ไฟล์ {filename}): {label} confidence={text_confidence:.3f}\n')
+                    results_file.flush()
+                    captures.append((crop, f'{capture_number}: {label}'))
+                    matching_track['captured'] = True
+                    print(f'แคป {filename} -> {label}')
+
+            tracks = [track for track in tracks if frame_number - track['last_frame'] <= frame_gap * 3]
+            display = cv2.hconcat([make_panel(frame, captures), frame])
+            cv2.imshow('Video ALPR - plates', display)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='ตรวจจับและอ่านป้ายทะเบียนจากไฟล์วิดีโอ')
+    parser.add_argument('video', nargs='?', default=os.getenv('VIDEO_PATH'), help='พาธไฟล์วิดีโอ')
+    args = parser.parse_args()
+    if not args.video:
+        raise SystemExit('กรุณาระบุไฟล์วิดีโอ เช่น python webcam_detect.py video.mp4')
+    process_video(args.video)

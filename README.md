@@ -53,3 +53,13 @@ python add_missing_data.py
 ```python
 python visualize.py
 ```
+
+## Video ALPR with automatic plate capture
+
+Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, confirms them across consecutive frames, captures each tracked vehicle once using the plate crop only, runs EasyOCR on the best crop, shows captured plates in the left `PLATES` panel, and writes OCR results to `results.txt`.
+
+```bash
+python webcam_detect.py path/to/video.mp4
+```
+
+Captured plate crops are saved in the `plates` folder. Press `q` to stop playback.
