@@ -13,13 +13,16 @@ PLATE_DIR = 'plates'
 RESULTS_FILE = 'results.txt'
 MODEL_PATH = 'license_plate_detector.pt'
 MIN_PLATE_CONFIDENCE = 0.50
-DEFAULT_IMAGE_SIZE = 960
-DEFAULT_DETECTION_INTERVAL = 2
+DEFAULT_IMAGE_SIZE = 1280
+DEFAULT_DETECTION_INTERVAL = 1
 MIN_TRACK_FRAMES = 6
-MAX_CROP_CANDIDATES = 4
-OCR_CROP_CANDIDATES = 2
-OCR_VARIANT_COUNT = 2
+MAX_CROP_CANDIDATES = 5
+OCR_CROP_CANDIDATES = 3
+OCR_VARIANT_COUNT = 3
 OCR_MIN_CONFIDENCE = 0.15
+MIN_ACCEPTED_OCR_CONFIDENCE = 0.30
+MIN_ACCEPTED_PLATE_LENGTH = 4
+MIN_ACCEPTED_PLATE_DIGITS = 2
 PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
@@ -73,6 +76,12 @@ def plate_shape_score(text):
     if thai_count >= 1 or latin_count >= 1:
         score += 0.10
     return score
+
+
+def looks_like_plate(text):
+    """Reject confident one-letter OCR hallucinations that are not plate-shaped."""
+    digit_count = sum(character.isdigit() for character in text)
+    return len(text) >= MIN_ACCEPTED_PLATE_LENGTH and digit_count >= MIN_ACCEPTED_PLATE_DIGITS
 
 
 def _ocr_candidates(detections, image_height):
@@ -197,7 +206,10 @@ def read_crop_candidates(track, reader):
         text, confidence = read_best_text(crop, reader)
         if text:
             observations.append((text, confidence))
-    return choose_text(observations)
+    text, confidence = choose_text(observations)
+    if confidence < MIN_ACCEPTED_OCR_CONFIDENCE or not looks_like_plate(text):
+        return '', confidence
+    return text, confidence
 
 
 def queue_track_capture(track, capture_number, reader, ocr_executor, captures, pending_ocr):

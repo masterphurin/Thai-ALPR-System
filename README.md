@@ -62,16 +62,16 @@ python visualize.py
 
 ## Video ALPR with automatic plate capture
 
-Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 960px every two frames by default, uses EasyOCR recognition-only on the already detected plate crop, keeps several sharp crops from each tracked plate, waits for a close/near-exit view before capturing, combines OCR results from two preprocessing variants in a background worker, shows captured plates in the left `PLATES` panel without freezing playback, and writes OCR results to `results.txt`.
+Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 1280px on every frame by default for small plates, uses EasyOCR recognition-only on the already detected plate crop, keeps several sharp crops from each tracked plate, waits for a close/near-exit view before capturing, combines OCR results from three preprocessing variants in a background worker, shows captured plates in the left `PLATES` panel without freezing playback, and writes OCR results to `results.txt`.
 
 ```bash
 python webcam_detect.py path/to/video.mp4
 ```
 
-For higher accuracy at the cost of CPU, process every frame at a larger detector input size:
+For a faster but less accurate run on a slower CPU:
 
 ```bash
-python webcam_detect.py path/to/video.mp4 --imgsz 1280 --detect-every 1
+python webcam_detect.py path/to/video.mp4 --imgsz 960 --detect-every 2
 ```
 
 Captured plate crops are saved in the `plates` folder. Press `q` to stop playback.
