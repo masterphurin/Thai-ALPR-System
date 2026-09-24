@@ -40,6 +40,12 @@ source activate ./env
 ```bash
 pip install -r requirements.txt
 ```
+
+The preview needs the GUI build of OpenCV. If another package replaces it with a headless build, run:
+
+```bash
+pip install --force-reinstall "opencv-python<4.10" "numpy<2"
+```
 * Run main.py with the sample video file to generate the test.csv file 
 ``` python
 python main.py
@@ -56,10 +62,16 @@ python visualize.py
 
 ## Video ALPR with automatic plate capture
 
-Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, confirms them across consecutive frames, captures each tracked vehicle once using the plate crop only, runs EasyOCR on the best crop, shows captured plates in the left `PLATES` panel, and writes OCR results to `results.txt`.
+Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 1280px on every frame by default for small plates, uses EasyOCR recognition-only on the already detected plate crop, keeps several sharp crops from each tracked plate, waits for a close/near-exit view before capturing, combines OCR results from three preprocessing variants in a background worker, shows captured plates in the left `PLATES` panel without freezing playback, and writes OCR results to `results.txt`.
 
 ```bash
 python webcam_detect.py path/to/video.mp4
+```
+
+For a faster but less accurate run on a slower CPU:
+
+```bash
+python webcam_detect.py path/to/video.mp4 --imgsz 960 --detect-every 2
 ```
 
 Captured plate crops are saved in the `plates` folder. Press `q` to stop playback.

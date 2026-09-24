@@ -1,7 +1,8 @@
 ultralytics==8.0.114
 pandas
-opencv-python
 numpy<2
 scipy
-easyocr
+easyocr==1.7.2
+# EasyOCR declares opencv-python-headless; keep GUI OpenCV last for cv2.imshow.
+opencv-python<4.10
 filterpy
