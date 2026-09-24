@@ -27,8 +27,6 @@ PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
 
-# EasyOCR commonly confuses these characters with digits on low-resolution plates.
-# Apply them only to the numeric part of a candidate, never to Thai characters.
 DIGIT_GUESSES = {
     'O': '0',
     'Q': '0',
@@ -106,6 +104,22 @@ def guess_plate_texts(text):
         return []
 
     guesses = [(cleaned, 1.0)]
+    thai_positions = [
+        index for index, character in enumerate(cleaned)
+        if '\u0e00' <= character <= '\u0e7f'
+    ]
+    if thai_positions:
+        numeric_start = thai_positions[-1] + 1
+        numeric_part = cleaned[numeric_start:]
+        if 2 <= len(numeric_part) <= 5:
+            guessed_numeric_part = ''.join(
+                DIGIT_GUESSES.get(character, character) for character in numeric_part
+            )
+            mapped_count = sum(character.isdigit() for character in guessed_numeric_part)
+            if mapped_count >= 2 and guessed_numeric_part != numeric_part:
+                guesses.append((cleaned[:numeric_start] + guessed_numeric_part, 0.90))
+                return guesses
+
     first_digit = next(
         (index for index, character in enumerate(cleaned) if character.isdigit()),
         None,
@@ -117,8 +131,6 @@ def guess_plate_texts(text):
             guesses.append((cleaned[:first_digit] + guessed_numeric_part, 0.94))
         return guesses
 
-    # If every digit was misread as a letter, only guess a short suffix when at
-    # least two characters support a digit interpretation.
     for suffix_length in range(2, min(4, len(cleaned)) + 1):
         split = len(cleaned) - suffix_length
         suffix = cleaned[split:]
