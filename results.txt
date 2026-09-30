@@ -1,3 +1,3 @@
 ภาพที่ 1 (ไฟล์ plates\plate_0001.jpg): อ่านไม่ออก confidence=0.000
 ภาพที่ 2 (ไฟล์ plates\plate_0002.jpg): อ่านไม่ออก confidence=0.000
-ภาพที่ 3 (ไฟล์ plates\plate_0003.jpg): อ่านไม่ออก confidence=0.274
+ภาพที่ 3 (ไฟล์ plates\plate_0003.jpg): ร3394 confidence=0.582
