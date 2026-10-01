@@ -27,6 +27,19 @@ PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
 
+DIGIT_GUESSES = {
+    'O': '0',
+    'Q': '0',
+    'D': '0',
+    'I': '1',
+    'L': '1',
+    'T': '1',
+    'Z': '2',
+    'S': '5',
+    'G': '6',
+    'B': '8',
+}
+
 
 def intersection_over_union(first, second):
     left = max(first[0], second[0])
@@ -84,6 +97,50 @@ def looks_like_plate(text):
     return len(text) >= MIN_ACCEPTED_PLATE_LENGTH and digit_count >= MIN_ACCEPTED_PLATE_DIGITS
 
 
+def guess_plate_texts(text):
+    """Return the OCR text plus cautious guesses for its numeric registration part."""
+    cleaned = clean_ocr_text(text)
+    if not cleaned:
+        return []
+
+    guesses = [(cleaned, 1.0)]
+    thai_positions = [
+        index for index, character in enumerate(cleaned)
+        if '\u0e00' <= character <= '\u0e7f'
+    ]
+    if thai_positions:
+        numeric_start = thai_positions[-1] + 1
+        numeric_part = cleaned[numeric_start:]
+        if 2 <= len(numeric_part) <= 5:
+            guessed_numeric_part = ''.join(
+                DIGIT_GUESSES.get(character, character) for character in numeric_part
+            )
+            mapped_count = sum(character.isdigit() for character in guessed_numeric_part)
+            if mapped_count >= 2 and guessed_numeric_part != numeric_part:
+                guesses.append((cleaned[:numeric_start] + guessed_numeric_part, 0.90))
+                return guesses
+
+    first_digit = next(
+        (index for index, character in enumerate(cleaned) if character.isdigit()),
+        None,
+    )
+    if first_digit is not None and first_digit < len(cleaned) - 1:
+        numeric_part = cleaned[first_digit:]
+        guessed_numeric_part = ''.join(DIGIT_GUESSES.get(character, character) for character in numeric_part)
+        if guessed_numeric_part != numeric_part:
+            guesses.append((cleaned[:first_digit] + guessed_numeric_part, 0.94))
+        return guesses
+
+    for suffix_length in range(2, min(4, len(cleaned)) + 1):
+        split = len(cleaned) - suffix_length
+        suffix = cleaned[split:]
+        mapped_suffix = ''.join(DIGIT_GUESSES.get(character, character) for character in suffix)
+        mapped_count = sum(character.isdigit() for character in mapped_suffix)
+        if mapped_count >= 2 and mapped_suffix != suffix:
+            guesses.append((cleaned[:split] + mapped_suffix, 0.82))
+    return guesses
+
+
 def _ocr_candidates(detections, image_height):
     """Convert EasyOCR boxes to line candidates and ignore the province text line."""
     usable = []
@@ -122,16 +179,14 @@ def choose_text(candidates):
     """Choose a stable result by combining repeated OCR text across variants/frames."""
     grouped = {}
     for text, confidence in candidates:
-        cleaned = clean_ocr_text(text)
-        if not cleaned:
-            continue
-        confidence = float(confidence)
-        shape = plate_shape_score(cleaned)
-        weighted_score = confidence * shape
-        item = grouped.setdefault(cleaned, {'total': 0.0, 'max_confidence': 0.0, 'count': 0})
-        item['total'] += weighted_score
-        item['max_confidence'] = max(item['max_confidence'], confidence)
-        item['count'] += 1
+        for cleaned, guess_confidence in guess_plate_texts(text):
+            confidence = float(confidence) * guess_confidence
+            shape = plate_shape_score(cleaned)
+            weighted_score = confidence * shape
+            item = grouped.setdefault(cleaned, {'total': 0.0, 'max_confidence': 0.0, 'count': 0})
+            item['total'] += weighted_score
+            item['max_confidence'] = max(item['max_confidence'], confidence)
+            item['count'] += 1
 
     if not grouped:
         return '', 0.0
