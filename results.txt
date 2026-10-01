@@ -5,3 +5,7 @@
 ภาพที่ 5 (ไฟล์ plates\plate_0005.jpg): โบท6268 confidence=0.524
 ภาพที่ 6 (ไฟล์ plates\plate_0006.jpg): อ่านไม่ออก confidence=0.000
 ภาพที่ 7 (ไฟล์ plates\plate_0007.jpg): อ่านไม่ออก confidence=0.287
+ภาพที่ 8 (ไฟล์ plates\plate_0008.jpg): อ่านไม่ออก confidence=0.000
+ภาพที่ 9 (ไฟล์ plates\plate_0009.jpg): อ่านไม่ออก confidence=0.189
+ภาพที่ 10 (ไฟล์ plates\plate_0010.jpg): อ่านไม่ออก confidence=0.000
+ภาพที่ 11 (ไฟล์ plates\plate_0011.jpg): อ่านไม่ออก confidence=0.260

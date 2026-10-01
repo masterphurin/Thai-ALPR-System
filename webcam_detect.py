@@ -19,8 +19,8 @@ MIN_TRACK_FRAMES = 6
 MAX_CROP_CANDIDATES = 5
 OCR_CROP_CANDIDATES = 3
 OCR_VARIANT_COUNT = 3
-OCR_MIN_CONFIDENCE = 0.15
-MIN_ACCEPTED_OCR_CONFIDENCE = 0.30
+OCR_MIN_CONFIDENCE = 0.08
+MIN_ACCEPTED_OCR_CONFIDENCE = 0.10
 MIN_ACCEPTED_PLATE_LENGTH = 4
 MIN_ACCEPTED_PLATE_DIGITS = 2
 PLATE_PADDING_RATIO = 0.10
@@ -207,25 +207,16 @@ def read_best_text(crop, reader):
     enlarged = cv2.copyMakeBorder(enlarged, 12, 12, 12, 12, cv2.BORDER_REPLICATE)
     gray = cv2.cvtColor(enlarged, cv2.COLOR_BGR2GRAY)
     contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    variants = [gray, cv2.threshold(contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]][:OCR_VARIANT_COUNT]
+    blurred = cv2.GaussianBlur(contrast, (0, 0), 1.2)
+    sharpened = cv2.addWeighted(contrast, 1.6, blurred, -0.6, 0)
+    thresholded = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    variants = [gray, sharpened, thresholded][:OCR_VARIANT_COUNT]
     candidates = []
     for variant in variants:
-        # The detector already supplied the plate box. Restrict recognition to
-        # the registration line and skip EasyOCR's expensive CRAFT detector.
-        height, width = variant.shape[:2]
-        left = int(width * 0.08)
-        right = max(left + 1, int(width * 0.92))
-        top = int(height * 0.12)
-        bottom = max(top + 1, int(height * 0.80))
-        registration_line = variant[top:bottom, left:right]
-        height, width = registration_line.shape[:2]
-        detections = reader.recognize(
-            registration_line,
-            horizontal_list=[[0, width, 0, height]],
-            free_list=[],
+        detections = reader.readtext(
+            variant,
             detail=1,
             paragraph=False,
-            batch_size=1,
             decoder='greedy',
         )
         candidates.extend(_ocr_candidates(detections, variant.shape[0]))
@@ -340,7 +331,7 @@ def process_video(
 
     print('กำลังโหลดโมเดล YOLO และ EasyOCR...')
     plate_detector = YOLO(MODEL_PATH)
-    reader = easyocr.Reader(['th', 'en'], gpu=False, detector=False, verbose=False)
+    reader = easyocr.Reader(['th', 'en'], gpu=False, verbose=False)
     captures = deque(maxlen=8)
     tracks = []
     pending_ocr = []
