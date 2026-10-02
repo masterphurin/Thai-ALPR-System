@@ -4,3 +4,7 @@
 ภาพที่ 4 (ไฟล์ plates\plate_0004.jpg): 8กาเก๓ confidence=0.312
 ภาพที่ 5 (ไฟล์ plates\plate_0005.jpg): 1ท6268 confidence=0.390
 ภาพที่ 6 (ไฟล์ plates\plate_0006.jpg): อ่านไม่ออก confidence=0.097
+ภาพที่ 7 (ไฟล์ plates\plate_0007.jpg): กม1118 confidence=0.778
+ภาพที่ 8 (ไฟล์ plates\plate_0008.jpg): อ่านไม่ออก confidence=0.000
+ภาพที่ 9 (ไฟล์ plates\plate_0009.jpg): 113828 confidence=0.281
+ภาพที่ 10 (ไฟล์ plates\plate_0010.jpg): 6064 confidence=0.986
