@@ -8,3 +8,4 @@
 ภาพที่ 8 (ไฟล์ plates\plate_0008.jpg): อ่านไม่ออก confidence=0.000
 ภาพที่ 9 (ไฟล์ plates\plate_0009.jpg): 113828 confidence=0.281
 ภาพที่ 10 (ไฟล์ plates\plate_0010.jpg): 6064 confidence=0.986
+ภาพที่ 11 (ไฟล์ plates\plate_0011.jpg): ข01779 confidence=0.333

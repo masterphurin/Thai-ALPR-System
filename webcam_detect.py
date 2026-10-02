@@ -14,7 +14,7 @@ RESULTS_FILE = 'results.txt'
 MODEL_PATH = 'license_plate_detector.pt'
 MIN_PLATE_CONFIDENCE = 0.50
 DEFAULT_IMAGE_SIZE = 1280
-DEFAULT_DETECTION_INTERVAL = 1
+DEFAULT_DETECTION_INTERVAL = 2
 MIN_TRACK_FRAMES = 6
 MAX_CROP_CANDIDATES = 5
 OCR_CROP_CANDIDATES = 3
@@ -386,6 +386,7 @@ def process_video(
                     }
                     tracks.append(matching_track)
                 matching_track['box'] = box
+                matching_track['confidence'] = confidence
                 matching_track['frame_count'] += 1
                 crop = crop_plate(frame, box)
                 remember_crop(matching_track, crop, crop_quality(crop, confidence))
@@ -405,10 +406,6 @@ def process_video(
                 matching_track['last_plate_width'] = plate_width
                 matching_track['last_frame'] = frame_number
 
-                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-                cv2.putText(frame, f'PLATE {confidence:.2f}', (box[0], max(24, box[1] - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-
                 ready_to_capture = (
                     matching_track['frame_count'] >= MIN_TRACK_FRAMES and
                     matching_track.get('near_enough', False) and
@@ -418,6 +415,15 @@ def process_video(
                     capture_number = queue_track_capture(
                         matching_track, capture_number, reader, ocr_executor, captures, pending_ocr
                     )
+
+            for track in tracks:
+                if frame_number - track['last_frame'] >= max(1, detection_interval):
+                    continue
+                box = track['box']
+                confidence = track.get('confidence', 0.0)
+                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+                cv2.putText(frame, f'PLATE {confidence:.2f}', (box[0], max(24, box[1] - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
             stale_tracks = [track for track in tracks if frame_number - track['last_frame'] > frame_gap]
             for track in stale_tracks:
