@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 from collections import deque
 
 import cv2
@@ -11,12 +12,14 @@ PLATE_DIR = 'plates'
 MODEL_PATH = 'license_plate_detector.pt'
 MIN_PLATE_CONFIDENCE = 0.50
 DEFAULT_IMAGE_SIZE = 1280
-DEFAULT_DETECTION_INTERVAL = 2
+DEFAULT_DETECTION_INTERVAL = 1
 MIN_TRACK_FRAMES = 6
 MAX_CROP_CANDIDATES = 5
 PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
+PLAYBACK_SPEED = 0.90
+CAPTURE_UPSCALE_FACTOR = 3
 
 
 def intersection_over_union(first, second):
@@ -68,15 +71,31 @@ def remember_crop(track, crop, quality):
     track['best_crop'] = candidates[0][1]
 
 
+def enhance_capture_crop(crop):
+    """Enlarge the saved plate crop and apply a mild unsharp mask."""
+    if crop.size == 0:
+        return crop
+
+    enlarged = cv2.resize(
+        crop,
+        None,
+        fx=CAPTURE_UPSCALE_FACTOR,
+        fy=CAPTURE_UPSCALE_FACTOR,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    blurred = cv2.GaussianBlur(enlarged, (0, 0), 1.0)
+    return cv2.addWeighted(enlarged, 1.35, blurred, -0.35, 0)
+
+
 def queue_track_capture(track, capture_number, captures):
     """Save the best plate crop without attempting to read its text."""
     if track.get('captured') or track.get('best_crop') is None:
         return capture_number
 
     capture_number += 1
-    crop = track['best_crop']
+    crop = enhance_capture_crop(track['best_crop'])
     filename = os.path.join(PLATE_DIR, f'plate_{capture_number:04d}.jpg')
-    if not cv2.imwrite(filename, crop):
+    if not cv2.imwrite(filename, crop, [cv2.IMWRITE_JPEG_QUALITY, 95]):
         print(f'บันทึกรูปไม่สำเร็จ: {filename}')
         return capture_number - 1
 
@@ -116,9 +135,14 @@ def process_video(
     tracks = []
     frame_number = 0
     capture_number = 0
-    frame_gap = max(1, int(cap.get(cv2.CAP_PROP_FPS) * 0.7))
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not np.isfinite(video_fps) or video_fps <= 0:
+        video_fps = 30.0
+    frame_gap = max(1, int(video_fps * 0.7))
+    target_frame_duration = 1.0 / (video_fps * PLAYBACK_SPEED)
 
     while True:
+        frame_started = time.perf_counter()
         ret, frame = cap.read()
         if not ret:
             break
@@ -205,7 +229,9 @@ def process_video(
         tracks = [track for track in tracks if frame_number - track['last_frame'] <= frame_gap]
         display = cv2.hconcat([make_panel(frame, captures), frame])
         cv2.imshow('Video - image capture', display)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        elapsed = time.perf_counter() - frame_started
+        wait_ms = max(1, int((target_frame_duration - elapsed) * 1000))
+        if cv2.waitKey(wait_ms) & 0xFF == ord('q'):
             break
 
     for track in tracks:

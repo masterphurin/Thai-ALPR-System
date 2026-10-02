@@ -260,7 +260,11 @@ class PlateScanner:
             wraplength=450,
         ).pack(anchor='w', pady=(4, 0))
         ttk.Label(content, textvariable=self.number_confidence_var).pack(anchor='w', pady=(0, 16))
-        ttk.Label(content, text='จังหวัด', font=('Tahoma', 14, 'bold')).pack(anchor='w')
+        ttk.Label(
+            content,
+            text='จังหวัด',
+            font=('Tahoma', 14, 'bold'),
+        ).pack(anchor='w')
         ttk.Label(
             content,
             textvariable=self.province_var,
@@ -414,15 +418,16 @@ class PlateScanner:
             (detections, extract_plate_fields(detections))
             for detections in detections_by_variant
         ]
-        return max(
+        best_detections = max(
             scored_detections,
             key=lambda result: (
                 sum(character.isdigit() for character in result[1][0]),
                 result[1][1],
                 sum(float(score) for _, _, score in result[0]),
             ),
-            default=([], ('', 0.0, '', [], False)),
+            default=([], ('', 0.0, '', [], False, False)),
         )[0]
+        return best_detections
 
     def _poll_result(self):
         if self.future is None or not self.future.done():
@@ -450,11 +455,12 @@ class PlateScanner:
                 f'{" · คาดเดาตัวอักษรเป็นตัวเลข" if was_guessed else ""}'
             ) if number else ''
         )
+        detail_lines = [
+            f'{text}  ({line_confidence:.1%})'
+            for text, line_confidence in lines
+        ]
         self._set_details(
-            '\n'.join(
-                f'{text}  ({line_confidence:.1%})'
-                for text, line_confidence in lines
-            ) or 'OCR ไม่พบข้อความในภาพ'
+            '\n'.join(detail_lines) or 'OCR ไม่พบข้อความในภาพ'
         )
         self.status_var.set('อ่านเสร็จแล้ว')
         self._set_busy(False)

@@ -62,7 +62,7 @@ python visualize.py
 
 ## Video ALPR with automatic plate capture
 
-Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 1280px every two frames by default, and keeps the latest detection box visible between inference frames. It keeps several sharp crops from each tracked plate and waits for a close/near-exit view before saving an image. It does not read or save plate text.
+Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 1280px every two frames by default, and keeps the latest detection box visible between inference frames. Playback is paced at 90% of the video's frame rate (when processing is fast enough), giving the capture logic a little more time without making the clip much slower. It keeps several sharp crops from each tracked plate and waits for a close/near-exit view before saving an image. It does not read or save plate text.
 
 ```bash
 python webcam_detect.py path/to/video.mp4
@@ -75,11 +75,11 @@ python webcam_detect.py path/to/video.mp4 --detect-every 1
 python webcam_detect.py path/to/video.mp4 --imgsz 960 --detect-every 2
 ```
 
-Captured plate crops are saved in the `plates` folder. Press `q` to stop playback.
+Captured plate crops are enlarged 3x with a mild sharpening filter and saved as high-quality JPEGs in the `plates` folder. Upscaling improves viewing size but cannot restore details missing from a blurry source frame. Press `q` to stop playback.
 
 ## Read a captured plate image
 
-Run `scan.py` to open two windows: one for selecting and viewing a plate image, and another for the recognized registration number, province, and OCR text. Small captured images are enlarged up to 2.5x in the preview. OCR tries the original enlarged image and enhanced variants; common letter/number lookalikes (such as `O`/`0` and `I`/`1`) are guessed in the numeric part and marked as guesses. Guesses can still be wrong, especially for blurry or very small images. The `plates` folder is opened by default; use the image buttons to choose or browse images in that folder.
+Run `scan.py` to open two windows: one for selecting and viewing a plate image, and another for the recognized registration number, province, and OCR text. Small captured images are enlarged up to 2.5x in the preview. OCR tries enhanced image variants; common letter/number lookalikes (such as `O`/`0` and `I`/`1`) are guessed in the numeric part and marked as guesses. Guesses can still be wrong, especially for blurry or very small images. The `plates` folder is opened by default; use the image buttons to choose or browse images in that folder.
 
 ```bash
 python scan.py
