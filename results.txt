@@ -1,3 +1,6 @@
-ภาพที่ 1 (ไฟล์ plates\plate_0001.jpg): อ่านไม่ออก confidence=0.000
-ภาพที่ 2 (ไฟล์ plates\plate_0002.jpg): อ่านไม่ออก confidence=0.117
-ภาพที่ 3 (ไฟล์ plates\plate_0003.jpg): อ่านไม่ออก confidence=0.439
+ภาพที่ 1 (ไฟล์ plates\plate_0001.jpg): อ่านไม่ออก confidence=0.619
+ภาพที่ 2 (ไฟล์ plates\plate_0002.jpg): อ่านไม่ออก confidence=0.091
+ภาพที่ 3 (ไฟล์ plates\plate_0003.jpg): กร3394 confidence=0.811
+ภาพที่ 4 (ไฟล์ plates\plate_0004.jpg): 8กาเก๓ confidence=0.312
+ภาพที่ 5 (ไฟล์ plates\plate_0005.jpg): 1ท6268 confidence=0.390
+ภาพที่ 6 (ไฟล์ plates\plate_0006.jpg): อ่านไม่ออก confidence=0.097

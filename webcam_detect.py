@@ -217,7 +217,8 @@ def read_best_text(crop, reader):
             variant,
             detail=1,
             paragraph=False,
-            decoder='greedy',
+            decoder='beamsearch',
+            beamWidth=10,
         )
         candidates.extend(_ocr_candidates(detections, variant.shape[0]))
     return choose_text(candidates)
