@@ -372,8 +372,7 @@ class PlateScanner:
         with Image.open(image_path) as source:
             image = ImageOps.exif_transpose(source).convert('RGB')
             frame = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
-        scale = max(1, min(10, 1000 // max(1, frame.shape[1])))
-        variants = [frame]
+        scale = max(1.0, min(10.0, 1600 / max(1, frame.shape[1])))
         if scale > 1:
             frame = cv2.resize(
                 frame,
@@ -382,26 +381,26 @@ class PlateScanner:
                 fy=scale,
                 interpolation=cv2.INTER_LANCZOS4,
             )
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-            sharpened = cv2.addWeighted(
-                contrast,
-                1.6,
-                cv2.GaussianBlur(contrast, (0, 0), 1.2),
-                -0.6,
-                0,
-            )
-            thresholded = cv2.threshold(
-                sharpened,
-                0,
-                255,
-                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-            )[1]
-            variants = [
-                frame,
-                cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR),
-                cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR),
-            ]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        sharpened = cv2.addWeighted(
+            contrast,
+            1.6,
+            cv2.GaussianBlur(contrast, (0, 0), 1.2),
+            -0.6,
+            0,
+        )
+        thresholded = cv2.threshold(
+            sharpened,
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )[1]
+        variants = [
+            frame,
+            cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR),
+            cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR),
+        ]
         detections_by_variant = [
             self.reader.readtext(
                 variant,
