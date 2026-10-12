@@ -11,15 +11,16 @@ from ultralytics import YOLO
 PLATE_DIR = 'plates'
 MODEL_PATH = 'license_plate_detector.pt'
 MIN_PLATE_CONFIDENCE = 0.50
-DEFAULT_IMAGE_SIZE = 1280
-DEFAULT_DETECTION_INTERVAL = 1
+DEFAULT_IMAGE_SIZE = 960
+DEFAULT_DETECTION_INTERVAL = 2
+MAX_DETECTION_DIMENSION = 1280
+MAX_DISPLAY_DIMENSION = 1280
 MIN_TRACK_FRAMES = 6
-MAX_CROP_CANDIDATES = 5
+MAX_CROP_CANDIDATES = 3
 PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
 PLAYBACK_SPEED = 0.90
-CAPTURE_UPSCALE_FACTOR = 3
 
 
 def intersection_over_union(first, second):
@@ -71,35 +72,20 @@ def remember_crop(track, crop, quality):
     track['best_crop'] = candidates[0][1]
 
 
-def enhance_capture_crop(crop):
-    """Enlarge the saved plate crop and apply a mild unsharp mask."""
-    if crop.size == 0:
-        return crop
-
-    enlarged = cv2.resize(
-        crop,
-        None,
-        fx=CAPTURE_UPSCALE_FACTOR,
-        fy=CAPTURE_UPSCALE_FACTOR,
-        interpolation=cv2.INTER_CUBIC,
-    )
-    blurred = cv2.GaussianBlur(enlarged, (0, 0), 1.0)
-    return cv2.addWeighted(enlarged, 1.35, blurred, -0.35, 0)
-
-
 def queue_track_capture(track, capture_number, captures):
     """Save the best plate crop without attempting to read its text."""
     if track.get('captured') or track.get('best_crop') is None:
         return capture_number
 
     capture_number += 1
-    crop = enhance_capture_crop(track['best_crop'])
+    crop = track['best_crop']
     filename = os.path.join(PLATE_DIR, f'plate_{capture_number:04d}.jpg')
-    if not cv2.imwrite(filename, crop, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+    if not cv2.imwrite(filename, crop, [cv2.IMWRITE_JPEG_QUALITY, 98]):
         print(f'บันทึกรูปไม่สำเร็จ: {filename}')
         return capture_number - 1
 
-    captures.append(crop.copy())
+    thumbnail = cv2.resize(crop, (280, 78), interpolation=cv2.INTER_AREA)
+    captures.append(thumbnail)
     track['captured'] = True
     print(f'แคปภาพแล้ว: {filename}')
     return capture_number
@@ -148,17 +134,34 @@ def process_video(
             break
         frame_number += 1
         height, width = frame.shape[:2]
+
         detections = []
         if frame_number % max(1, detection_interval) == 0:
+            detection_scale = min(
+                1.0,
+                MAX_DETECTION_DIMENSION / max(height, width),
+            )
+            detection_frame = frame
+            if detection_scale < 1.0:
+                detection_frame = cv2.resize(
+                    frame,
+                    None,
+                    fx=detection_scale,
+                    fy=detection_scale,
+                    interpolation=cv2.INTER_AREA,
+                )
             result = plate_detector(
-                frame,
+                detection_frame,
                 verbose=False,
                 conf=MIN_PLATE_CONFIDENCE,
                 iou=0.45,
                 imgsz=image_size,
             )[0]
             for box in result.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                x1, y1, x2, y2 = (
+                    int(round(coordinate / detection_scale))
+                    for coordinate in box.xyxy[0].tolist()
+                )
                 x1, y1, x2, y2 = clamp_box((x1, y1, x2, y2), width, height)
                 confidence = float(box.conf[0])
                 if confidence >= MIN_PLATE_CONFIDENCE and x2 > x1 and y2 > y1:
@@ -227,7 +230,17 @@ def process_video(
             if track.get('frame_count', 0) >= MIN_TRACK_FRAMES:
                 capture_number = queue_track_capture(track, capture_number, captures)
         tracks = [track for track in tracks if frame_number - track['last_frame'] <= frame_gap]
-        display = cv2.hconcat([make_panel(frame, captures), frame])
+        display_scale = min(1.0, MAX_DISPLAY_DIMENSION / max(height, width))
+        display_frame = frame
+        if display_scale < 1.0:
+            display_frame = cv2.resize(
+                frame,
+                None,
+                fx=display_scale,
+                fy=display_scale,
+                interpolation=cv2.INTER_AREA,
+            )
+        display = cv2.hconcat([make_panel(display_frame, captures), display_frame])
         cv2.imshow('Video - image capture', display)
         elapsed = time.perf_counter() - frame_started
         wait_ms = max(1, int((target_frame_duration - elapsed) * 1000))
@@ -249,13 +262,13 @@ if __name__ == '__main__':
         '--imgsz',
         type=int,
         default=DEFAULT_IMAGE_SIZE,
-        help=f'ขนาดภาพที่ส่งเข้า YOLO (ค่าเริ่มต้น {DEFAULT_IMAGE_SIZE}; ใช้ 1280 เพื่อความแม่นยำสูงสุด)',
+        help=f'ขนาดภาพที่ส่งเข้า YOLO (ค่าเริ่มต้น {DEFAULT_IMAGE_SIZE}; เพิ่มค่านี้เพื่อเน้นความแม่นยำ)',
     )
     parser.add_argument(
         '--detect-every',
         type=int,
         default=DEFAULT_DETECTION_INTERVAL,
-        help=f'ตรวจจับ YOLO ทุกกี่เฟรม (ค่าเริ่มต้น {DEFAULT_DETECTION_INTERVAL}; ใช้ 1 เพื่อความแม่นยำสูงสุด)',
+        help=f'ตรวจจับ YOLO ทุกกี่เฟรม (ค่าเริ่มต้น {DEFAULT_DETECTION_INTERVAL}; เพิ่มค่านี้เพื่อลดการใช้ทรัพยากร)',
     )
     args = parser.parse_args()
     if not args.video:
