@@ -62,20 +62,19 @@ python visualize.py
 
 ## Video ALPR with automatic plate capture
 
-Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, runs YOLO at 1280px every two frames by default, and keeps the latest detection box visible between inference frames. Playback is paced at 90% of the video's frame rate (when processing is fast enough), giving the capture logic a little more time without making the clip much slower. It keeps several sharp crops from each tracked plate and waits for a close/near-exit view before saving an image. It does not read or save plate text.
+Use `webcam_detect.py` with a video file instead of a webcam. The program uses `license_plate_detector.pt`, accepts plate detections with at least 50% model confidence, and runs YOLO at 1280px on every frame by default so it can compare more views and select the sharpest crop. Playback is paced at half the video's frame rate (when processing is fast enough); inference may slow it further. It keeps several candidate crops from each tracked plate and waits for a close/near-exit view before saving an image. The saved crop is enlarged 3x with mild sharpening for easier viewing; upscaling cannot restore detail missing from a blurry source frame. It does not read or save plate text.
 
 ```bash
 python webcam_detect.py path/to/video.mp4
 ```
 
-To prioritize detection on every frame, or to trade some image detail for additional speed on a slower CPU:
+To trade some image detail for additional speed on a slower CPU:
 
 ```bash
-python webcam_detect.py path/to/video.mp4 --detect-every 1
 python webcam_detect.py path/to/video.mp4 --imgsz 960 --detect-every 2
 ```
 
-Captured plate crops are enlarged 3x with a mild sharpening filter and saved as high-quality JPEGs in the `plates` folder. Upscaling improves viewing size but cannot restore details missing from a blurry source frame. Press `q` to stop playback.
+Captured plate crops are saved as high-quality JPEGs in the `plates` folder. Press `q` to stop playback.
 
 ## Read a captured plate image
 

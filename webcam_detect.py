@@ -11,8 +11,8 @@ from ultralytics import YOLO
 PLATE_DIR = 'plates'
 MODEL_PATH = 'license_plate_detector.pt'
 MIN_PLATE_CONFIDENCE = 0.50
-DEFAULT_IMAGE_SIZE = 960
-DEFAULT_DETECTION_INTERVAL = 2
+DEFAULT_IMAGE_SIZE = 1280
+DEFAULT_DETECTION_INTERVAL = 1
 MAX_DETECTION_DIMENSION = 1280
 MAX_DISPLAY_DIMENSION = 1280
 MIN_TRACK_FRAMES = 6
@@ -20,7 +20,7 @@ MAX_CROP_CANDIDATES = 3
 PLATE_PADDING_RATIO = 0.10
 MIN_CAPTURE_PLATE_WIDTH = 90
 SHRINKING_FRAMES_TO_CAPTURE = 2
-PLAYBACK_SPEED = 0.90
+PLAYBACK_SPEED = 0.50
 
 
 def intersection_over_union(first, second):
@@ -79,8 +79,11 @@ def queue_track_capture(track, capture_number, captures):
 
     capture_number += 1
     crop = track['best_crop']
+    enlarged_crop = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    softened_crop = cv2.GaussianBlur(enlarged_crop, (0, 0), 1.0)
+    clear_crop = cv2.addWeighted(enlarged_crop, 1.25, softened_crop, -0.25, 0)
     filename = os.path.join(PLATE_DIR, f'plate_{capture_number:04d}.jpg')
-    if not cv2.imwrite(filename, crop, [cv2.IMWRITE_JPEG_QUALITY, 98]):
+    if not cv2.imwrite(filename, clear_crop, [cv2.IMWRITE_JPEG_QUALITY, 98]):
         print(f'บันทึกรูปไม่สำเร็จ: {filename}')
         return capture_number - 1
 
