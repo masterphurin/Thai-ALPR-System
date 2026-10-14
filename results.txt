@@ -1,9 +1,0 @@
-ภาพที่ 1 (ไฟล์ plates\plate_0001.jpg): อ่านไม่ออก confidence=0.000
-ภาพที่ 2 (ไฟล์ plates\plate_0002.jpg): อ่านไม่ออก confidence=0.117
-ภาพที่ 3 (ไฟล์ plates\plate_0003.jpg): อ่านไม่ออก confidence=0.439
-ภาพที่ 4 (ไฟล์ plates\plate_0004.jpg): อ่านไม่ออก confidence=0.148
-ภาพที่ 5 (ไฟล์ plates\plate_0005.jpg): อ่านไม่ออก confidence=0.000
-ภาพที่ 6 (ไฟล์ plates\plate_0006.jpg): อ่านไม่ออก confidence=0.097
-ภาพที่ 7 (ไฟล์ plates\plate_0007.jpg): อ่านไม่ออก confidence=0.387
-ภาพที่ 8 (ไฟล์ plates\plate_0008.jpg): อ่านไม่ออก confidence=0.892
-ภาพที่ 9 (ไฟล์ plates\plate_0009.jpg): อ่านไม่ออก confidence=0.093

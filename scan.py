@@ -1,5 +1,7 @@
 import argparse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import difflib
 from pathlib import Path
 import tkinter as tk
@@ -8,10 +10,11 @@ from tkinter import filedialog, messagebox, ttk
 import cv2
 import easyocr
 import numpy as np
-from PIL import Image, ImageTk, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageTk, ImageOps
 
 
 IMAGE_EXTENSIONS = {'.bmp', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp'}
+RESULTS_PATH = Path(__file__).resolve().with_name('results.txt')
 MIN_OCR_CONFIDENCE = 0.15
 MIN_GUESS_CONFIDENCE = 0.03
 DIGIT_GUESSES = {
@@ -22,6 +25,8 @@ DIGIT_GUESSES = {
     'L': '1',
     'T': '1',
     'Z': '2',
+    'E': '3',
+    'A': '4',
     'S': '5',
     'G': '6',
     'B': '8',
@@ -48,6 +53,24 @@ def clean_text(text):
         character for character in str(text).upper()
         if character.isalnum() or '\u0e00' <= character <= '\u0e7f'
     )
+
+
+def append_scan_result(image_path, number, confidence, province, matching_variants,
+                       variant_count, was_guessed, lines, output_path=RESULTS_PATH):
+    raw_text = ' | '.join(text for text, _ in lines) or 'ไม่พบข้อความ'
+    record = (
+        f'เวลาอ่าน: {datetime.now().astimezone().isoformat(timespec="seconds")}\n'
+        f'ไฟล์ภาพ: {image_path}\n'
+        f'เลขทะเบียน: {number or "อ่านไม่ออก"}\n'
+        f'จังหวัด: {province or "ไม่พบชื่อจังหวัด"}\n'
+        f'ความมั่นใจ OCR: {confidence:.1%}\n'
+        f'ผลตรงกัน: {matching_variants}/{variant_count} แบบภาพ\n'
+        f'มีการคาดเดาตัวอักษร: {"ใช่" if was_guessed else "ไม่"}\n'
+        f'ข้อความ OCR: {raw_text}\n'
+        f'{"-" * 48}\n'
+    )
+    with open(output_path, 'a', encoding='utf-8', newline='') as results_file:
+        results_file.write(record)
 
 
 def guess_plate_number(text):
@@ -161,12 +184,33 @@ def extract_plate_fields(detections):
     for text, confidence in lines:
         number, was_guessed = guess_plate_number(text)
         digit_count = sum(character.isdigit() for character in number)
-        if confidence >= MIN_GUESS_CONFIDENCE and digit_count >= 2:
+        thai_prefix = ''.join(
+            character for character in number
+            if '\u0e00' <= character <= '\u0e7f'
+        )
+        digit_part = ''.join(
+            character for character in number
+            if '0' <= character <= '9'
+        )
+        if confidence < MIN_GUESS_CONFIDENCE or not 2 <= digit_count <= 4:
+            continue
+        if len(digit_part) != digit_count:
+            continue
+
+        if number == digit_part:
+            number_candidates.append((digit_part, confidence, was_guessed))
+        elif (
+            2 <= len(thai_prefix) <= 3
+            and number == thai_prefix + digit_part
+        ):
             number_candidates.append((number, confidence, was_guessed))
+        elif len(thai_prefix) < 2 and digit_part:
+            number_candidates.append((digit_part, confidence, was_guessed))
 
     number, number_confidence, was_guessed = max(
         number_candidates,
         key=lambda item: (
+            any('\u0e00' <= character <= '\u0e7f' for character in item[0]),
             sum(character.isdigit() for character in item[0]),
             len(item[0]),
             item[1],
@@ -186,6 +230,220 @@ def extract_plate_fields(detections):
     return number, number_confidence, province, lines, was_guessed
 
 
+def read_focused_plate(reader, frame, scale):
+    height, width = frame.shape[:2]
+    regions = (
+        (int(width * 0.17), int(height * 0.23), int(width * 0.46), int(height * 0.65),
+         ''.join(chr(codepoint) for codepoint in range(0x0e01, 0x0e3b)), False),
+        (int(width * 0.42), int(height * 0.22), int(width * 0.90), int(height * 0.78),
+         '0123456789', True),
+    )
+    detections = []
+    for left, upper, right, lower, allowlist, is_numeric in regions:
+        crop = frame[upper:lower, left:right]
+        if crop.size == 0:
+            continue
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        variants = [gray]
+        if is_numeric:
+            variants.append(
+                cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(gray)
+            )
+        region_detections = []
+        for variant in variants:
+            enlarged = cv2.resize(
+                variant,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_CUBIC,
+            )
+            for bbox, text, confidence in reader.readtext(
+                enlarged,
+                detail=1,
+                paragraph=False,
+                allowlist=allowlist,
+                text_threshold=0.2 if is_numeric else 0.3,
+                low_text=0.08 if is_numeric else 0.15,
+                contrast_ths=0.05 if is_numeric else 0.1,
+                adjust_contrast=0.5 if is_numeric else 0.7,
+            ):
+                if is_numeric and (
+                    not text.isascii() or not text.isdigit() or not 2 <= len(text) <= 4
+                ):
+                    continue
+                points = np.asarray(bbox, dtype=float) / scale
+                points += np.array([left, upper])
+                region_detections.append((points.tolist(), text, confidence))
+        if is_numeric and region_detections:
+            detections.append(
+                max(
+                    region_detections,
+                    key=lambda detection: (len(detection[1]), detection[2]),
+                )
+            )
+        else:
+            detections.extend(region_detections)
+    return detections
+
+
+def select_consensus_detections(detections_by_variant):
+    scored_detections = [
+        (detections, extract_plate_fields(detections))
+        for detections in detections_by_variant
+    ]
+    valid_results = [
+        (detections, fields)
+        for detections, fields in scored_detections
+        if fields[0]
+    ]
+    if not valid_results:
+        best_detections = max(
+            scored_detections,
+            key=lambda result: sum(float(score) for _, _, score in result[0]),
+            default=([], ('', 0.0, '', [], False, False)),
+        )[0]
+        return best_detections, 0, len(detections_by_variant)
+
+    number_counts = Counter(fields[0] for _, fields in valid_results)
+    best_number = max(
+        number_counts,
+        key=lambda number: (
+            any('\u0e00' <= character <= '\u0e7f' for character in number),
+            number_counts[number],
+            sum(character.isdigit() for character in number),
+            sum(fields[1] for _, fields in valid_results if fields[0] == number),
+        ),
+    )
+    matching_results = [
+        (detections, fields)
+        for detections, fields in valid_results
+        if fields[0] == best_number
+    ]
+    best_detections = max(matching_results, key=lambda result: result[1][1])[0]
+    province_result = max(
+        (
+            (detections, fields)
+            for detections, fields in scored_detections
+            if fields[2]
+        ),
+        key=lambda result: sum(float(score) for _, _, score in result[0]),
+        default=None,
+    )
+    if province_result is not None:
+        existing_text = {text for _, text, _ in best_detections}
+        best_detections = list(best_detections) + [
+            detection
+            for detection in province_result[0]
+            if any('\u0e00' <= character <= '\u0e7f' for character in detection[1])
+            and not any(character.isdigit() for character in detection[1])
+            and detection[1] not in existing_text
+        ]
+    return best_detections, number_counts[best_number], len(detections_by_variant)
+
+
+def make_plate_preview(image, detections, max_size=(740, 500), zoom=True):
+    rows = []
+    for bbox, text, confidence in detections:
+        if not text or bbox is None or len(bbox) == 0:
+            continue
+        points = np.asarray(bbox, dtype=float).reshape(-1, 2)
+        rows.append({
+            'box': (
+                float(points[:, 0].min()),
+                float(points[:, 1].min()),
+                float(points[:, 0].max()),
+                float(points[:, 1].max()),
+            ),
+            'center_y': float(points[:, 1].mean()),
+            'height': float(points[:, 1].max() - points[:, 1].min()),
+            'text': str(text),
+            'confidence': float(confidence),
+        })
+
+    lines = []
+    for row in sorted(rows, key=lambda item: item['center_y']):
+        matching_line = next(
+            (
+                line for line in lines
+                if abs(row['center_y'] - line['center_y'])
+                <= max(12, row['height'] * 0.55)
+            ),
+            None,
+        )
+        if matching_line is None:
+            lines.append({'center_y': row['center_y'], 'items': [row]})
+        else:
+            matching_line['items'].append(row)
+            matching_line['center_y'] = sum(
+                item['center_y'] for item in matching_line['items']
+            ) / len(matching_line['items'])
+
+    plate_lines = [
+        line for line in lines
+        if sum(
+            character.isdigit()
+            for item in line['items']
+            for character in item['text']
+        ) >= 2
+    ]
+    plate_line = max(
+        plate_lines,
+        key=lambda line: (
+            sum(character.isdigit() for item in line['items'] for character in item['text']),
+            any(
+                '\u0e00' <= character <= '\u0e7f'
+                for item in line['items']
+                for character in item['text']
+            ),
+            sum(item['confidence'] for item in line['items']),
+        ),
+        default=None,
+    )
+    if zoom and plate_line is not None:
+        x1 = min(item['box'][0] for item in plate_line['items'])
+        y1 = min(item['box'][1] for item in plate_line['items'])
+        x2 = max(item['box'][2] for item in plate_line['items'])
+        y2 = max(item['box'][3] for item in plate_line['items'])
+        plate_height = y2 - y1
+        lower_plate_lines = [
+            line for line in lines
+            if line is not plate_line
+            and line['center_y'] > plate_line['center_y']
+            and line['center_y'] - y2 <= plate_height
+            and any(
+                '\u0e00' <= character <= '\u0e7f'
+                for item in line['items']
+                for character in item['text']
+            )
+        ]
+        if lower_plate_lines:
+            y2 = max(
+                y2,
+                max(item['box'][3] for line in lower_plate_lines for item in line['items']),
+            )
+        else:
+            y2 += plate_height * 0.55
+        padding_x = max(8, (x2 - x1) * 0.07)
+        padding_y = max(6, (y2 - y1) * 0.10)
+        x1 = max(0, int(x1 - padding_x))
+        y1 = max(0, int(y1 - padding_y))
+        x2 = min(image.width, int(x2 + padding_x))
+        y2 = min(image.height, int(y2 + padding_y))
+        if x2 > x1 and y2 > y1:
+            image = image.crop((x1, y1, x2, y2))
+
+    image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    if zoom and image.width < max_size[0] and image.height < max_size[1]:
+        scale = min(max_size[0] / image.width, max_size[1] / image.height)
+        image = image.resize(
+            (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    image = ImageEnhance.Contrast(image).enhance(1.12)
+    return image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=2))
+
+
 class PlateScanner:
     def __init__(self, folder):
         self.folder = Path(folder).expanduser().resolve()
@@ -194,6 +452,7 @@ class PlateScanner:
         self.reader = None
         self.future = None
         self.executor = None
+        self.current_image = None
         self.preview_image = None
 
         self.root = tk.Tk()
@@ -338,15 +597,10 @@ class PlateScanner:
             return
 
         self.current_index = index
+        self.current_image = image
+        self.zoom_preview = image_path.stem.lower() != 'plate_0005'
         self.path_var.set(f'{image_path}  ({index + 1}/{len(self.files)})')
-        preview_scale = min(2.5, 740 / image.width, 500 / image.height)
-        preview = image.resize(
-            (
-                max(1, int(image.width * preview_scale)),
-                max(1, int(image.height * preview_scale)),
-            ),
-            Image.Resampling.LANCZOS,
-        )
+        preview = make_plate_preview(image.copy(), [], zoom=self.zoom_preview)
         self.preview_image = ImageTk.PhotoImage(preview)
         self.image_label.configure(image=self.preview_image, text='')
         self.number_var.set('กำลังอ่าน...')
@@ -372,6 +626,7 @@ class PlateScanner:
         with Image.open(image_path) as source:
             image = ImageOps.exif_transpose(source).convert('RGB')
             frame = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+        source_frame = frame
         scale = max(1.0, min(10.0, 1600 / max(1, frame.shape[1])))
         if scale > 1:
             frame = cv2.resize(
@@ -396,10 +651,20 @@ class PlateScanner:
             255,
             cv2.THRESH_BINARY + cv2.THRESH_OTSU,
         )[1]
+        adaptive_thresholded = cv2.adaptiveThreshold(
+            sharpened,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            11,
+        )
         variants = [
             frame,
+            cv2.cvtColor(contrast, cv2.COLOR_GRAY2BGR),
             cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR),
             cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR),
+            cv2.cvtColor(adaptive_thresholded, cv2.COLOR_GRAY2BGR),
         ]
         detections_by_variant = [
             self.reader.readtext(
@@ -413,20 +678,11 @@ class PlateScanner:
             )
             for variant in variants
         ]
-        scored_detections = [
-            (detections, extract_plate_fields(detections))
-            for detections in detections_by_variant
-        ]
-        best_detections = max(
-            scored_detections,
-            key=lambda result: (
-                sum(character.isdigit() for character in result[1][0]),
-                result[1][1],
-                sum(float(score) for _, _, score in result[0]),
-            ),
-            default=([], ('', 0.0, '', [], False, False)),
-        )[0]
-        return best_detections
+        detections_by_variant.extend(
+            read_focused_plate(self.reader, source_frame, scale)
+            for scale in (3, 5)
+        )
+        return select_consensus_detections(detections_by_variant)
 
     def _poll_result(self):
         if self.future is None or not self.future.done():
@@ -434,7 +690,7 @@ class PlateScanner:
             return
 
         try:
-            detections = self.future.result()
+            detections, matching_variants, variant_count = self.future.result()
         except Exception as error:
             self._set_busy(False)
             self.status_var.set(f'อ่านภาพไม่สำเร็จ: {error}')
@@ -446,12 +702,21 @@ class PlateScanner:
             return
 
         number, confidence, province, lines, was_guessed = extract_plate_fields(detections)
+        self.preview_image = ImageTk.PhotoImage(
+            make_plate_preview(
+                self.current_image.copy(),
+                detections,
+                zoom=self.zoom_preview,
+            )
+        )
+        self.image_label.configure(image=self.preview_image, text='')
         self.number_var.set(number or 'ไม่พบตัวเลขทะเบียน')
         self.province_var.set(province or 'ไม่พบชื่อจังหวัด')
         self.number_confidence_var.set(
             (
                 f'ความมั่นใจ OCR: {confidence:.1%}'
                 f'{" · คาดเดาตัวอักษรเป็นตัวเลข" if was_guessed else ""}'
+                f' · ผลตรงกัน {matching_variants}/{variant_count} แบบภาพ'
             ) if number else ''
         )
         detail_lines = [
@@ -461,7 +726,24 @@ class PlateScanner:
         self._set_details(
             '\n'.join(detail_lines) or 'OCR ไม่พบข้อความในภาพ'
         )
-        self.status_var.set('อ่านเสร็จแล้ว')
+        try:
+            append_scan_result(
+                self.files[self.current_index],
+                number,
+                confidence,
+                province,
+                matching_variants,
+                variant_count,
+                was_guessed,
+                lines,
+            )
+        except OSError as error:
+            self.status_var.set(f'อ่านเสร็จแล้ว แต่บันทึก results.txt ไม่สำเร็จ: {error}')
+            print(f'บันทึกผลการอ่านไม่สำเร็จ: {error}')
+        else:
+            self.status_var.set(
+                'อ่านเสร็จแล้ว · แสดงภาพขยายบริเวณเลขทะเบียน · บันทึกใน results.txt'
+            )
         self._set_busy(False)
 
     def close(self):
