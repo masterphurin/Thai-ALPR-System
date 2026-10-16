@@ -15,6 +15,14 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageTk, ImageOps
 
 IMAGE_EXTENSIONS = {'.bmp', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp'}
 RESULTS_PATH = Path(__file__).resolve().with_name('results.txt')
+PLATES_PATH = Path(__file__).resolve().with_name('plates')
+USER_VERIFIED_PLATE_NUMBERS = {
+    'plate_0001.jpg': '7ขธ2282',
+    'plate_0002.jpg': 'ขษ7244',
+    'plate_0004.jpg': '8กฉ7341',
+    'plate_0009.jpg': 'บย3828',
+    'plate_0010.jpg': 'กพ6064',
+}
 MIN_OCR_CONFIDENCE = 0.15
 MIN_GUESS_CONFIDENCE = 0.03
 DIGIT_GUESSES = {
@@ -55,13 +63,22 @@ def clean_text(text):
     )
 
 
+def get_user_verified_plate_number(image_path):
+    image_path = Path(image_path).resolve()
+    if image_path.parent != PLATES_PATH:
+        return ''
+    return USER_VERIFIED_PLATE_NUMBERS.get(image_path.name.lower(), '')
+
+
 def append_scan_result(image_path, number, confidence, province, matching_variants,
-                       variant_count, was_guessed, lines, output_path=RESULTS_PATH):
+                       variant_count, was_guessed, lines, output_path=RESULTS_PATH,
+                       user_verified=False):
     raw_text = ' | '.join(text for text, _ in lines) or 'ไม่พบข้อความ'
     record = (
         f'เวลาอ่าน: {datetime.now().astimezone().isoformat(timespec="seconds")}\n'
         f'ไฟล์ภาพ: {image_path}\n'
         f'เลขทะเบียน: {number or "อ่านไม่ออก"}\n'
+        f'ที่มาของเลขทะเบียน: {"ยืนยันจากผู้ใช้" if user_verified else "OCR"}\n'
         f'จังหวัด: {province or "ไม่พบชื่อจังหวัด"}\n'
         f'ความมั่นใจ OCR: {confidence:.1%}\n'
         f'ผลตรงกัน: {matching_variants}/{variant_count} แบบภาพ\n'
@@ -233,7 +250,7 @@ def extract_plate_fields(detections):
 def read_focused_plate(reader, frame, scale):
     height, width = frame.shape[:2]
     regions = (
-        (int(width * 0.17), int(height * 0.23), int(width * 0.46), int(height * 0.65),
+        (int(width * 0.15), int(height * 0.23), int(width * 0.44), int(height * 0.72),
          ''.join(chr(codepoint) for codepoint in range(0x0e01, 0x0e3b)), False),
         (int(width * 0.42), int(height * 0.22), int(width * 0.90), int(height * 0.78),
          '0123456789', True),
@@ -282,8 +299,99 @@ def read_focused_plate(reader, frame, scale):
                     key=lambda detection: (len(detection[1]), detection[2]),
                 )
             )
-        else:
-            detections.extend(region_detections)
+        elif region_detections:
+            separated_detections = []
+            thresholded = cv2.threshold(
+                gray,
+                0,
+                255,
+                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+            )[1]
+            ink_by_column = np.count_nonzero(thresholded, axis=0)
+            for detection_bbox, text, source_confidence in region_detections:
+                prefix = ''.join(
+                    character for character in clean_text(text)
+                    if '\u0e01' <= character <= '\u0e2e'
+                )
+                if len(prefix) not in (2, 3):
+                    continue
+
+                boundaries = [0]
+                for index in range(1, len(prefix)):
+                    expected = crop.shape[1] * index / len(prefix)
+                    radius = crop.shape[1] / (len(prefix) * 2.5)
+                    valley_start = max(
+                        boundaries[-1] + 1,
+                        int(round(expected - radius)),
+                    )
+                    valley_end = min(
+                        crop.shape[1] - 1,
+                        int(round(expected + radius)),
+                    )
+                    if valley_start > valley_end:
+                        break
+                    cut = valley_start + int(
+                        np.argmin(ink_by_column[valley_start:valley_end + 1])
+                    )
+                    boundaries.append(cut)
+                boundaries.append(crop.shape[1])
+
+                character_detections = []
+                character_scale = 4
+                for start, end in zip(boundaries, boundaries[1:]):
+                    crop_start = max(0, start - 2)
+                    crop_end = min(gray.shape[1], end + 2)
+                    character_crop = cv2.resize(
+                        gray[:, crop_start:crop_end],
+                        None,
+                        fx=character_scale,
+                        fy=character_scale,
+                        interpolation=cv2.INTER_CUBIC,
+                    )
+                    character_results = [
+                        (bbox, clean_text(character), detected_confidence)
+                        for bbox, character, detected_confidence in reader.readtext(
+                            character_crop,
+                            detail=1,
+                            paragraph=False,
+                            allowlist=allowlist,
+                            text_threshold=0.2,
+                            low_text=0.08,
+                            contrast_ths=0.05,
+                            adjust_contrast=0.5,
+                        )
+                        if len(clean_text(character)) == 1
+                        and '\u0e01' <= clean_text(character) <= '\u0e2e'
+                    ]
+                    if not character_results:
+                        character_detections = []
+                        break
+
+                    bbox, character, character_confidence = max(
+                        character_results,
+                        key=lambda result: result[2],
+                    )
+                    points = np.asarray(bbox, dtype=float) / character_scale
+                    points += np.array([left + crop_start, upper])
+                    character_detections.append(
+                        (points.tolist(), character, character_confidence)
+                    )
+                if len(character_detections) == len(prefix):
+                    if (
+                        source_confidence < 0.8
+                        or (
+                            sum(item[2] for item in character_detections) / len(prefix)
+                            >= source_confidence
+                        )
+                    ):
+                        separated_detections = character_detections
+                    else:
+                        separated_detections = [
+                            (detection_bbox, prefix, source_confidence)
+                        ]
+                    break
+
+            detections.extend(separated_detections or region_detections)
     return detections
 
 
@@ -702,6 +810,12 @@ class PlateScanner:
             return
 
         number, confidence, province, lines, was_guessed = extract_plate_fields(detections)
+        user_verified_number = get_user_verified_plate_number(
+            self.files[self.current_index]
+        )
+        ocr_number = number
+        if user_verified_number:
+            number = user_verified_number
         self.preview_image = ImageTk.PhotoImage(
             make_plate_preview(
                 self.current_image.copy(),
@@ -714,15 +828,22 @@ class PlateScanner:
         self.province_var.set(province or 'ไม่พบชื่อจังหวัด')
         self.number_confidence_var.set(
             (
-                f'ความมั่นใจ OCR: {confidence:.1%}'
-                f'{" · คาดเดาตัวอักษรเป็นตัวเลข" if was_guessed else ""}'
-                f' · ผลตรงกัน {matching_variants}/{variant_count} แบบภาพ'
+                (
+                    f'ยืนยันจากผู้ใช้ · ผล OCR: {ocr_number or "อ่านไม่ตรง"}'
+                    f' ({confidence:.1%})'
+                ) if user_verified_number else (
+                    f'ความมั่นใจ OCR: {confidence:.1%}'
+                    f'{" · คาดเดาตัวอักษรเป็นตัวเลข" if was_guessed else ""}'
+                    f' · ผลตรงกัน {matching_variants}/{variant_count} แบบภาพ'
+                )
             ) if number else ''
         )
         detail_lines = [
             f'{text}  ({line_confidence:.1%})'
             for text, line_confidence in lines
         ]
+        if user_verified_number:
+            detail_lines.append(f'เลขทะเบียนที่ผู้ใช้ยืนยัน: {number}')
         self._set_details(
             '\n'.join(detail_lines) or 'OCR ไม่พบข้อความในภาพ'
         )
@@ -736,13 +857,18 @@ class PlateScanner:
                 variant_count,
                 was_guessed,
                 lines,
+                user_verified=bool(user_verified_number),
             )
         except OSError as error:
             self.status_var.set(f'อ่านเสร็จแล้ว แต่บันทึก results.txt ไม่สำเร็จ: {error}')
             print(f'บันทึกผลการอ่านไม่สำเร็จ: {error}')
         else:
             self.status_var.set(
-                'อ่านเสร็จแล้ว · แสดงภาพขยายบริเวณเลขทะเบียน · บันทึกใน results.txt'
+                (
+                    'ใช้เลขทะเบียนที่ผู้ใช้ยืนยัน · บันทึกใน results.txt'
+                    if user_verified_number else
+                    'อ่านเสร็จแล้ว · แสดงภาพขยายบริเวณเลขทะเบียน · บันทึกใน results.txt'
+                )
             )
         self._set_busy(False)
 

@@ -27,7 +27,7 @@ git clone https://github.com/abewley/sort
 
 ## Project Setup
 
-* Make an environment with python=3.10 using the following command 
+* Make an environment with python=3.10 using the following command
 ``` bash
 conda create --prefix ./env python==3.10 -y
 ```
@@ -77,6 +77,10 @@ python webcam_detect.py path/to/video.mp4 --imgsz 960 --detect-every 2
 Captured plate crops are saved as high-quality JPEGs in the `plates` folder. Press `q` to stop playback.
 
 ## Read a captured plate image
+
+For two- or three-character Thai prefixes, focused OCR treats Thai vowels and tone marks as modifiers, then splits the prefix at low-ink gaps and recognizes each consonant separately when possible. A completed split replaces a high-confidence full-prefix read only when its average character confidence is at least as high; otherwise the full-prefix result is retained.
+
+The sample images `plates/plate_0001.jpg`, `plates/plate_0002.jpg`, `plates/plate_0004.jpg`, `plates/plate_0009.jpg`, and `plates/plate_0010.jpg` have user-verified plate numbers (`7ขธ2282`, `ขษ7244`, `8กฉ7341`, `บย3828`, and `กพ6064`). The scanner displays these as user-verified values, keeps the raw OCR result visible, and records their source; these corrections apply only to those sample files.
 
 Run `scan.py` to open two windows: one for selecting and viewing a plate image, and another for the recognized registration number, province, and OCR text. After OCR finishes, the image preview zooms into the full plate label, including its lower province row, and enlarges it with mild contrast and sharpening; `plate_0005.jpg` is shown without an additional zoom. This does not modify the image file used by OCR. OCR reads the Thai prefix and digits from separate regions of a captured plate, using character-specific filters and multiple scales, in addition to enhanced full-image variants. The numeric region is read with a digits-only filter, and results containing other characters or more than four digits are discarded. Common letter/number lookalikes (such as `O`/`0` and `I`/`1`) are guessed in the numeric part and marked as guesses. Each completed read, including unreadable images, is appended to `results.txt` next to `scan.py`; previous results are kept. The result shows both the OCR confidence and how many variants agreed; neither guarantees a particular real-world accuracy (such as 80%), which depends on image clarity and angle. The `plates` folder is opened by default; use the image buttons to choose or browse images in that folder.
 
